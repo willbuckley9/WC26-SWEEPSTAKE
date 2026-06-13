@@ -64,8 +64,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .ko-btns{display:flex;gap:5px}
 .ko-btn{flex:1;padding:4px 6px;border:1px solid #ddd;border-radius:5px;background:#fff;cursor:pointer;font-size:11px;font-weight:600;color:#555;text-align:center}
 .ko-btn.sel{background:#1a1a18;color:#fff;border-color:#1a1a18}
-.admin-bar{background:#1a1a18;color:#fff;padding:8px 14px;font-size:12px;text-align:center;display:none}
+.admin-bar{background:#2d6a4f;color:#fff;padding:7px 14px;font-size:12px;text-align:center;display:none}
 .admin-bar.visible{display:block}
+.loading{text-align:center;padding:3rem;color:#aaa;font-size:14px}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(8px);background:#1a1a18;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:999;white-space:nowrap}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media(max-width:560px){
@@ -88,7 +89,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     <a class="live-btn" href="https://www.bbc.co.uk/sport/football/world-cup" target="_blank">📺 BBC</a>
   </div>
 </div>
-<div class="admin-bar" id="admin-bar">🔒 Admin mode — you can sync scores</div>
+<div class="admin-bar" id="admin-bar">🔒 Admin mode active — Sync button enabled</div>
 
 <div class="wrap">
   <div class="tabs">
@@ -99,13 +100,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <div id="tab-leaderboard" class="section active">
     <div class="upd-bar">
       <div>
-        <span id="last-upd">Loading scores…</span>
+        <span id="last-upd">Loading…</span>
         <div class="sync-info" id="sync-info"></div>
       </div>
       <a href="https://www.bbc.co.uk/sport/football/world-cup" target="_blank">BBC live scores →</a>
     </div>
     <div class="lb-header"><span></span><span>Participant</span><span style="text-align:center">Pts</span><span style="text-align:center">Wins</span><span style="text-align:center">Goals</span><span style="text-align:center">Games</span></div>
-    <div id="lb-rows"></div>
+    <div id="lb-rows"><div class="loading">Loading leaderboard…</div></div>
   </div>
 
   <div id="tab-fixtures" class="section">
@@ -134,44 +135,44 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
         <button id="sort-btn-group" class="sort-btn" onclick="setSort('group')">🔤 By group</button>
       </div>
     </div>
-    <div id="fixtures-list"></div>
+    <div id="fixtures-list"><div class="loading">Loading fixtures…</div></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GITHUB_USER  = 'willbuckley9';
-const GITHUB_REPO  = 'WC26-SWEEPSTAKE';
-const SCORES_FILE  = 'scores.json';
-const RAW_BASE     = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/${SCORES_FILE}`;
-const API_BASE     = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${SCORES_FILE}`;
-// Token is stored in sessionStorage — only Will enters it, only persists for the browser session
-let GH_TOKEN       = sessionStorage.getItem('sc_token') || null;
+const GH_USER  = 'willbuckley9';
+const GH_REPO  = 'WC26-SWEEPSTAKE';
+const GH_FILE  = 'scores.json';
+const API_URL  = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${GH_FILE}`;
 
-// ─── ADMIN MODE ──────────────────────────────────────────────────────────────
-function checkAdmin(){
-  // Check if ?admin param or token already stored
-  if(new URLSearchParams(location.search).get('admin')==='1' || GH_TOKEN){
-    document.getElementById('sync-btn').style.display='flex';
-    document.getElementById('admin-bar').classList.add('visible');
+// Admin token — stored in sessionStorage, never in code
+let GH_TOKEN = sessionStorage.getItem('sc_tok') || null;
+
+// ─── ADMIN SETUP ─────────────────────────────────────────────────────────────
+function initAdmin(){
+  if(new URLSearchParams(location.search).get('admin')==='1'){
     if(!GH_TOKEN){
-      const t = prompt('Enter your GitHub token to enable syncing:');
-      if(t){ GH_TOKEN=t; sessionStorage.setItem('sc_token',t); }
+      const t = prompt('Paste your GitHub token to enable admin mode:');
+      if(t && t.startsWith('ghp_')){ GH_TOKEN = t; sessionStorage.setItem('sc_tok', t); }
+      else { alert('Invalid token — admin mode not enabled'); return; }
     }
+    document.getElementById('sync-btn').style.display = 'flex';
+    document.getElementById('admin-bar').classList.add('visible');
   }
 }
 
-// ─── NAME MAP ────────────────────────────────────────────────────────────────
-const API_NAME_MAP = {
+// ─── NAME NORMALISATION ───────────────────────────────────────────────────────
+const NAME_MAP = {
   'United States':'USA',
   'Bosnia and Herzegovina':'Bosnia & Herzegovina',
   'Democratic Republic of the Congo':'DR Congo',
 };
-function norm(n){ return API_NAME_MAP[n]||n; }
+const norm = n => NAME_MAP[n] || n;
 
-// ─── PLAYERS ─────────────────────────────────────────────────────────────────
-const PLAYERS=[
+// ─── PLAYERS (locked) ────────────────────────────────────────────────────────
+const PLAYERS = [
   {name:"Luke",    teams:["USA","Sweden","Scotland","Curaçao"]},
   {name:"Aaron",   teams:["Norway","Turkey","South Korea","South Africa"]},
   {name:"Will",    teams:["Netherlands","Mexico","Australia","Uzbekistan"]},
@@ -186,8 +187,8 @@ const PLAYERS=[
   {name:"Sam",     teams:["Argentina","Austria","Algeria","Jordan"]},
 ];
 
-// ─── FIXTURES ────────────────────────────────────────────────────────────────
-const RAW_FIXTURES=[
+// ─── FIXTURES (BBC Sport BST times) ──────────────────────────────────────────
+const FIXTURES=[
   {id:1,date:"2026-06-11",ukTime:"20:00",t1:"Mexico",t2:"South Africa",group:"Group A"},
   {id:2,date:"2026-06-12",ukTime:"03:00",t1:"South Korea",t2:"Czech Republic",group:"Group A"},
   {id:3,date:"2026-06-18",ukTime:"17:00",t1:"Czech Republic",t2:"South Africa",group:"Group A"},
@@ -295,94 +296,122 @@ const RAW_FIXTURES=[
 ];
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
-let scores = {};
-let scoresSHA = null; // GitHub file SHA needed for updates
+// scores uses NUMBER keys throughout — critical for fixture ID matching
+let scores = {};      // { [numericId]: {hg,ag,out,api} }
+let scoresSHA = null; // GitHub blob SHA needed for PUT updates
 let editingId = null;
 let sortMode = 'date';
 
-// ─── LOAD SCORES FROM GITHUB ─────────────────────────────────────────────────
+// ─── GITHUB READ/WRITE ───────────────────────────────────────────────────────
+async function ghGet(){
+  // Always use the API (not raw) so we get fresh data every time, plus the SHA
+  const headers = {'Accept':'application/vnd.github+json'};
+  if(GH_TOKEN) headers['Authorization'] = 'token ' + GH_TOKEN;
+  const res = await fetch(API_URL + '?t=' + Date.now(), {headers});
+  if(!res.ok) throw new Error('GitHub read ' + res.status);
+  const meta = await res.json();
+  scoresSHA = meta.sha;
+  // Decode base64 → JSON → ensure all keys are numbers
+  const raw = JSON.parse(atob(meta.content.replace(/\n/g,'')));
+  const out = {};
+  Object.keys(raw).forEach(k => { out[parseInt(k)] = raw[k]; });
+  return out;
+}
+
+async function ghPut(data){
+  if(!GH_TOKEN) throw new Error('No token');
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+  const res = await fetch(API_URL, {
+    method: 'PUT',
+    headers: {
+      'Authorization': 'token ' + GH_TOKEN,
+      'Content-Type': 'application/json',
+      'Accept': 'application/vnd.github+json'
+    },
+    body: JSON.stringify({message: 'Update scores', content, sha: scoresSHA})
+  });
+  if(!res.ok){
+    const err = await res.json();
+    throw new Error(err.message || 'GitHub write ' + res.status);
+  }
+  const d = await res.json();
+  scoresSHA = d.content.sha; // always update SHA after write
+}
+
+// ─── LOAD ON PAGE START ───────────────────────────────────────────────────────
 async function loadScores(){
   try{
-    // Use raw URL with cache-busting so everyone always gets fresh data
-    const res = await fetch(RAW_BASE + '?t=' + Date.now());
-    if(res.ok){
-      const data = await res.json();
-      scores = data;
-      // Convert string keys back to numbers
-      const numScores = {};
-      Object.keys(scores).forEach(k=>{ numScores[parseInt(k)] = scores[k]; });
-      scores = numScores;
-    }
-    // Also get the SHA for later writes (only matters for admin)
-    if(GH_TOKEN){
-      const meta = await fetch(API_BASE, {headers:{Authorization:'token '+GH_TOKEN}});
-      if(meta.ok){ const m=await meta.json(); scoresSHA=m.sha; }
-    }
-  }catch(e){ console.warn('Could not load scores:', e); }
+    scores = await ghGet();
+    const n = Object.keys(scores).length;
+    document.getElementById('last-upd').textContent = n
+      ? `${n} result${n!==1?'s':''} logged`
+      : 'No results yet — check back soon!';
+  } catch(e){
+    document.getElementById('last-upd').textContent = 'Could not load scores';
+    console.warn(e);
+  }
   renderLeaderboard();
   renderFixtures();
-  document.getElementById('last-upd').textContent =
-    Object.keys(scores).length ? Object.keys(scores).length + ' results logged' : 'No results yet';
 }
 
-// ─── SAVE SCORES TO GITHUB ───────────────────────────────────────────────────
-async function saveScoresToGitHub(){
-  if(!GH_TOKEN) return;
-  const content = btoa(JSON.stringify(scores, null, 2));
-  const body = {message:'Update scores', content, sha: scoresSHA};
-  const res = await fetch(API_BASE, {
-    method:'PUT',
-    headers:{Authorization:'token '+GH_TOKEN,'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  });
-  if(res.ok){
-    const d = await res.json();
-    scoresSHA = d.content.sha;
-  } else {
-    throw new Error('GitHub write failed: ' + res.status);
-  }
-}
-
-// ─── LIVE API SYNC ───────────────────────────────────────────────────────────
+// ─── LIVE API SYNC (admin only) ───────────────────────────────────────────────
 async function syncScores(){
   const btn = document.getElementById('sync-btn');
   const icon = document.getElementById('spin-icon');
-  btn.disabled=true; icon.className='spinning'; icon.textContent='↻';
+  btn.disabled = true; icon.className = 'spinning';
   try{
-    const res = await fetch('https://worldcup26.ir/get/games');
-    if(!res.ok) throw new Error('API '+res.status);
-    const {games} = await res.json();
+    // 1. Pull fresh scores from GitHub first to get latest SHA
+    scores = await ghGet();
+
+    // 2. Fetch live match data from the football API
+    const apiRes = await fetch('https://worldcup26.ir/get/games');
+    if(!apiRes.ok) throw new Error('Football API ' + apiRes.status);
+    const {games} = await apiRes.json();
+
+    // Build lookup by normalised team name pair
     const lookup = {};
-    games.forEach(g=>{
-      const h=norm(g.home_team_name_en||''), a=norm(g.away_team_name_en||'');
-      if(h&&a){ lookup[h+'|'+a]=g; lookup[a+'|'+h]={...g,_flip:true}; }
+    games.forEach(g => {
+      const h = norm(g.home_team_name_en||''), a = norm(g.away_team_name_en||'');
+      if(h && a){
+        lookup[h+'|'+a] = g;
+        lookup[a+'|'+h] = {...g, _flip:true};
+      }
     });
-    let updated=0;
-    RAW_FIXTURES.forEach(f=>{
-      if(f.ko) return;
-      const g=lookup[f.t1+'|'+f.t2]; if(!g) return;
-      if(g.finished!=='TRUE'&&g.time_elapsed!=='finished') return;
-      const hg=parseInt(g._flip?g.away_score:g.home_score)||0;
-      const ag=parseInt(g._flip?g.home_score:g.away_score)||0;
-      const out=hg>ag?'home':ag>hg?'away':'draw';
-      if(scores[f.id]&&!scores[f.id].api) return; // manual takes priority
-      scores[f.id]={hg,ag,out,api:true}; updated++;
+
+    let updated = 0;
+    FIXTURES.forEach(f => {
+      if(f.ko) return; // only group stage from API
+      const g = lookup[f.t1+'|'+f.t2]; if(!g) return;
+      if(g.finished !== 'TRUE' && g.time_elapsed !== 'finished') return;
+      const hg = parseInt(g._flip ? g.away_score : g.home_score) || 0;
+      const ag = parseInt(g._flip ? g.home_score : g.away_score) || 0;
+      const out = hg > ag ? 'home' : ag > hg ? 'away' : 'draw';
+      // Don't overwrite manual entries
+      if(scores[f.id] && !scores[f.id].api) return;
+      scores[f.id] = {hg, ag, out, api:true};
+      updated++;
     });
-    await saveScoresToGitHub();
+
+    // 3. Write back to GitHub
+    await ghPut(scores);
+
     renderLeaderboard(); renderFixtures();
-    const ts=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    document.getElementById('sync-info').textContent='Last synced: '+ts;
-    toast(updated>0?'✓ Synced '+updated+' result'+(updated!==1?'s':''):'No new results');
-  }catch(e){ toast('⚠ Sync failed: '+e.message,3000); }
-  finally{ btn.disabled=false; icon.className=''; icon.textContent='↻'; }
+    const ts = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    document.getElementById('sync-info').textContent = 'Last synced: ' + ts;
+    toast(updated > 0 ? `✓ Synced ${updated} result${updated!==1?'s':''}` : '✓ No new results — already up to date');
+  } catch(e){
+    toast('⚠ ' + e.message, 4000);
+    console.error(e);
+  } finally {
+    btn.disabled = false; icon.className = ''; icon.textContent = '↻';
+  }
 }
 
-// ─── KO RESOLUTION ───────────────────────────────────────────────────────────
-function getGroupStandings(group){
-  const gf=RAW_FIXTURES.filter(f=>f.group===group);
-  const teams=[...new Set(gf.flatMap(f=>[f.t1,f.t2]))];
-  const tbl={};
-  teams.forEach(t=>{tbl[t]={pts:0,gd:0,gf:0};});
+// ─── KNOCKOUT RESOLUTION ─────────────────────────────────────────────────────
+function groupStandings(group){
+  const gf = FIXTURES.filter(f=>f.group===group);
+  const tbl = {};
+  [...new Set(gf.flatMap(f=>[f.t1,f.t2]))].forEach(t=>{tbl[t]={pts:0,gd:0,gf:0};});
   gf.forEach(f=>{
     const s=scores[f.id]; if(!s) return;
     tbl[f.t1].gf+=s.hg; tbl[f.t2].gf+=s.ag;
@@ -393,26 +422,26 @@ function getGroupStandings(group){
   });
   return Object.entries(tbl).sort((a,b)=>b[1].pts-a[1].pts||b[1].gd-a[1].gd||b[1].gf-a[1].gf).map(e=>e[0]);
 }
-function resolveTeam(label){
-  if(!label) return null;
-  if(!label.match(/^[WL]?\d+$/)&&!label.match(/^[12](st|nd) [A-L]$/)&&!label.match(/^Best/)) return label;
-  const m1=label.match(/^([12])(?:st|nd) ([A-L])$/);
-  if(m1){const st=getGroupStandings('Group '+m1[2]);return st[parseInt(m1[1])-1]||label;}
-  const mw=label.match(/^W(\d+)$/);
-  if(mw){const s=scores[+mw[1]];if(!s)return null;const f=RAW_FIXTURES.find(x=>x.id===+mw[1]);if(!f)return null;const r1=resolveTeam(f.t1),r2=resolveTeam(f.t2);return s.out==='home'?r1:r2;}
-  const ml=label.match(/^L(\d+)$/);
-  if(ml){const s=scores[+ml[1]];if(!s)return null;const f=RAW_FIXTURES.find(x=>x.id===+ml[1]);if(!f)return null;const r1=resolveTeam(f.t1),r2=resolveTeam(f.t2);return s.out==='home'?r2:r1;}
-  return label;
+function resolveTeam(lbl){
+  if(!lbl) return null;
+  if(!lbl.match(/^[WL]?\d+$/) && !lbl.match(/^[12](st|nd) [A-L]$/) && !lbl.match(/^Best/)) return lbl;
+  const m1=lbl.match(/^([12])(?:st|nd) ([A-L])$/);
+  if(m1){const st=groupStandings('Group '+m1[2]);return st[parseInt(m1[1])-1]||lbl;}
+  const mw=lbl.match(/^W(\d+)$/);
+  if(mw){const id=+mw[1],s=scores[id];if(!s)return null;const f=FIXTURES.find(x=>x.id===id);if(!f)return null;const r1=resolveTeam(f.t1),r2=resolveTeam(f.t2);return s.out==='home'?r1:r2;}
+  const ml=lbl.match(/^L(\d+)$/);
+  if(ml){const id=+ml[1],s=scores[id];if(!s)return null;const f=FIXTURES.find(x=>x.id===id);if(!f)return null;const r1=resolveTeam(f.t1),r2=resolveTeam(f.t2);return s.out==='home'?r2:r1;}
+  return lbl;
 }
-function disp(label,res){if(res&&res!==label&&!res.match(/^[WL]?\d+$/)&&!res.match(/^[12]/))return res;return label;}
+function disp(lbl,res){if(res&&res!==lbl&&!res.match(/^[WL]?\d+$/)&&!res.match(/^[12]/))return res;return lbl;}
 
 // ─── POINTS ──────────────────────────────────────────────────────────────────
 function calcPoints(){
   const pts={},wins={},goals={},played={};
   PLAYERS.forEach(p=>{pts[p.name]=0;wins[p.name]=0;goals[p.name]=0;played[p.name]=0;});
-  RAW_FIXTURES.forEach(f=>{
-    const s=scores[f.id];if(!s)return;
-    const rt1=resolveTeam(f.t1)||f.t1,rt2=resolveTeam(f.t2)||f.t2;
+  FIXTURES.forEach(f=>{
+    const s=scores[f.id]; if(!s) return;
+    const rt1=resolveTeam(f.t1)||f.t1, rt2=resolveTeam(f.t2)||f.t2;
     PLAYERS.forEach(p=>{p.teams.forEach(t=>{
       if(t===rt1){goals[p.name]+=s.hg;pts[p.name]+=s.hg;played[p.name]++;if(s.out==='home'){pts[p.name]+=5;wins[p.name]++;}}
       if(t===rt2){goals[p.name]+=s.ag;pts[p.name]+=s.ag;played[p.name]++;if(s.out==='away'){pts[p.name]+=5;wins[p.name]++;}}
@@ -436,10 +465,11 @@ function renderLeaderboard(){
   });
   document.getElementById('lb-rows').innerHTML=html||'<div style="text-align:center;padding:2rem;color:#aaa">No results yet</div>';
   const n=Object.keys(scores).length;
-  document.getElementById('last-upd').textContent=n?`${n} result${n!==1?'s':''} logged`:'No results yet';
+  document.getElementById('last-upd').textContent=n?`${n} result${n!==1?'s':''} logged`:'No results yet — check back soon!';
 }
 
-// ─── FIXTURES ────────────────────────────────────────────────────────────────
+// ─── FIXTURES RENDER ─────────────────────────────────────────────────────────
+const isAdmin=()=>!!GH_TOKEN;
 function setSort(m){sortMode=m;document.getElementById('sort-btn-date').classList.toggle('active',m==='date');document.getElementById('sort-btn-group').classList.toggle('active',m==='group');renderFixtures();}
 function sortKey(f){const[h,m]=(f.ukTime||'12:00').split(':').map(Number);return f.date+'_'+(h*60+m).toString().padStart(4,'0');}
 function todayUK(){return new Date().toLocaleDateString('en-CA',{timeZone:'Europe/London'});}
@@ -447,27 +477,28 @@ function fmtDT(f){return new Date(f.date+'T12:00:00').toLocaleDateString('en-GB'
 
 function renderFixtures(){
   const filter=document.getElementById('filter-round').value;
-  let m=[...RAW_FIXTURES];
+  let m=[...FIXTURES];
   if(filter==='today')m=m.filter(f=>f.date===todayUK());
   else if(filter==='pending')m=m.filter(f=>!scores[f.id]);
   else if(filter==='played')m=m.filter(f=>!!scores[f.id]);
   else if(filter)m=m.filter(f=>(f.group||f.round)===filter);
+  const empty='<div style="text-align:center;padding:2rem;color:#aaa">No fixtures found</div>';
   if(sortMode==='date'){
     m.sort((a,b)=>sortKey(a).localeCompare(sortKey(b)));
     const sec={};m.forEach(f=>{if(!sec[f.date])sec[f.date]=[];sec[f.date].push(f);});
-    let html='';Object.keys(sec).sort().forEach(d=>{html+=`<div class="round-label">${new Date(d+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div>`;sec[d].forEach(f=>{html+=renderFixRow(f);});});
-    document.getElementById('fixtures-list').innerHTML=html||empty();
+    let html='';Object.keys(sec).sort().forEach(d=>{
+      html+=`<div class="round-label">${new Date(d+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div>`;
+      sec[d].forEach(f=>{html+=renderFixRow(f);});
+    });
+    document.getElementById('fixtures-list').innerHTML=html||empty;
   }else{
     const sec={};m.forEach(f=>{const k=f.group||f.round||'Other';if(!sec[k])sec[k]=[];sec[k].push(f);});
     const order=['Group A','Group B','Group C','Group D','Group E','Group F','Group G','Group H','Group I','Group J','Group K','Group L','Round of 32','Round of 16','Quarter-final','Semi-final','Third place','Final'];
     const keys=filter&&!['pending','played','today'].includes(filter)?[filter]:order.filter(k=>sec[k]);
     let html='';keys.forEach(k=>{if(!sec[k])return;html+=`<div class="round-label">${k}</div>`;sec[k].sort((a,b)=>sortKey(a).localeCompare(sortKey(b))).forEach(f=>{html+=renderFixRow(f);});});
-    document.getElementById('fixtures-list').innerHTML=html||empty();
+    document.getElementById('fixtures-list').innerHTML=html||empty;
   }
 }
-function empty(){return'<div style="text-align:center;padding:2rem;color:#aaa">No fixtures found</div>';}
-
-const isAdmin = () => !!GH_TOKEN;
 
 function renderFixRow(f){
   const s=scores[f.id],isEdit=editingId===f.id;
@@ -478,19 +509,17 @@ function renderFixRow(f){
   const rowCls='fix-row'+(s?' played':'')+(!s&&isEdit?' editing':'')+apiTag;
   const grp=`<span class="fix-group">${f.group||f.round||''}</span>`;
   const dt=`<span class="fix-date">${fmtDT(f)}</span>`;
+
   if(s&&!isEdit){
     const hw=s.out==='home'?'⚡ ':'',aw=s.out==='away'?' ⚡':'';
     const apiDot=s.api?'<span style="font-size:9px;color:#2d6a4f;margin-left:4px">●api</span>':'';
     const editBtn=isAdmin()?`<button class="fix-edit" onclick="startEdit(${f.id})">✏️</button>`:'';
-    let koNote='';
-    if(isKO&&s.out!=='draw'){const w=s.out==='home'?d1:d2;if(s.hg===s.ag)koNote=`<div style="font-size:10px;color:#713f12;margin-top:3px">🏆 ${w} on pens</div>`;}
+    let koNote='';if(isKO&&s.out!=='draw'){const w=s.out==='home'?d1:d2;if(s.hg===s.ag)koNote=`<div style="font-size:10px;color:#713f12;margin-top:3px">🏆 ${w} on pens</div>`;}
     return`<div class="${rowCls}" id="fix-${f.id}">${grp}${dt}<span class="fix-team home${tbd1?' tbd':''}">${hw}${d1}</span><div style="display:flex;flex-direction:column;align-items:center"><div class="fix-score"><span class="fix-score-display">${s.hg}–${s.ag}</span>${apiDot}${editBtn}</div>${koNote}</div><span class="fix-team${tbd2?' tbd':''}">${d2}${aw}</span><span></span></div>`;
   }
   if(!isAdmin()&&!s){
-    // Non-admin sees unplayed fixtures as read-only
     return`<div class="${rowCls}" id="fix-${f.id}">${grp}${dt}<span class="fix-team home${tbd1?' tbd':''}">${d1}</span><div class="fix-score"><span class="fix-score-dash" style="font-size:13px;color:#ccc">vs</span></div><span class="fix-team${tbd2?' tbd':''}">${d2}</span><span></span></div>`;
   }
-  // Admin edit mode
   const hv=isEdit?(s.hg||0):0,av=isEdit?(s.ag||0):0,out=isEdit?(s.out||'home'):'home';
   if(!isKO){
     return`<div class="${rowCls}" id="fix-${f.id}">${grp}${dt}<div class="fix-team home${tbd1?' tbd':''}">${d1}</div><div class="fix-score"><input type="number" id="gh-${f.id}" min="0" max="20" value="${hv}" style="width:32px"><span class="fix-score-dash">–</span><input type="number" id="ga-${f.id}" min="0" max="20" value="${av}" style="width:32px"></div><div class="fix-team${tbd2?' tbd':''}">${d2}</div><div style="display:flex;flex-direction:column;gap:4px;align-items:center"><button class="fix-save" onclick="saveFixture(${f.id})">Save ✓</button>${isEdit?`<button class="fix-edit" onclick="cancelEdit()">✕</button>`:''}</div></div>`;
@@ -504,7 +533,7 @@ function cancelEdit(){editingId=null;renderFixtures();}
 function setKOWin(fid,o){['h','d','a'].forEach(x=>{const b=document.getElementById(`ko-${x}-${fid}`);if(b)b.classList.toggle('sel',(x==='h'&&o==='home')||(x==='d'&&o==='draw')||(x==='a'&&o==='away'));});document.getElementById(`fix-${fid}`).dataset.koOut=o;}
 
 async function saveFixture(fid){
-  const f=RAW_FIXTURES.find(x=>x.id===fid);
+  const f=FIXTURES.find(x=>x.id===fid);
   const hg=parseInt(document.getElementById('gh-'+fid).value)||0;
   const ag=parseInt(document.getElementById('ga-'+fid).value)||0;
   const row=document.getElementById('fix-'+fid);
@@ -514,10 +543,10 @@ async function saveFixture(fid){
   scores[fid]={hg,ag,out,api:false};
   editingId=null;
   try{
-    await saveScoresToGitHub();
+    await ghPut(scores);
     renderLeaderboard();renderFixtures();
-    toast('✓ Result saved & published');
-  }catch(e){toast('⚠ Save failed: '+e.message,3000);}
+    toast('✓ Saved & published!');
+  }catch(e){toast('⚠ '+e.message,4000);}
 }
 
 function showTab(id,btn){
@@ -528,10 +557,10 @@ function showTab(id,btn){
   if(id==='fixtures')renderFixtures();
 }
 
-function toast(msg,d=2200){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),d);}
+function toast(msg,d=2500){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),d);}
 
-// ─── INIT ────────────────────────────────────────────────────────────────────
-checkAdmin();
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+initAdmin();
 loadScores();
 </script>
 </body>
