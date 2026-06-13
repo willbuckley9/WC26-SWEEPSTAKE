@@ -1,1 +1,26 @@
-{}
+{
+  "1": {
+    "hg": 2,
+    "ag": 0,
+    "out": "home",
+    "api": true
+  },
+  "2": {
+    "hg": 2,
+    "ag": 1,
+    "out": "home",
+    "api": true
+  },
+  "7": {
+    "hg": 1,
+    "ag": 1,
+    "out": "draw",
+    "api": true
+  },
+  "19": {
+    "hg": 4,
+    "ag": 1,
+    "out": "home",
+    "api": true
+  }
+}
